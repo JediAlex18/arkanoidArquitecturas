@@ -1,0 +1,217 @@
+#####################################################################
+# Proyecto de Arquitecturas Gráficas - URJC
+# Autoras: Claudia Porcuna, Alexandra Pop
+#
+# Arkanoid en MIPS - MARS
+# - Bitmap Display: 32x32 (cada celda de 8x8 píxeles)
+# - Dirección base: 0x10008000
+# - Mover la pala con teclas 'A' (izquierda) y 'D' (derecha)
+#####################################################################
+
+.data
+COLOR_BG:      .word 0xADD8E6     # Azul claro (fondo)
+COLOR_PALA:    .word 0x006400     # Verde oscuro (pala)
+COLOR_BOLA:    .word 0x404040     # Gris (bola)
+COLOR_BRICK:   .word 0xFF0000     # Rojo (ladrillos)
+
+# Mapa de ladrillos (1 = activo, 0 = roto)
+BRICKS: .word 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+        .word 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+        .word 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+        .word 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+        .word 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+
+.text
+.globl main
+
+main:
+    # Inicialización de variables
+    li $s0, 15         # Posición X de la pala
+    li $s1, 29         # Posición Y de la pala (fija, al fondo)
+    li $s2, 20         # Posición X de la bola
+    li $s3, 24         # Posición Y de la bola (más arriba)
+    li $s4, 1          # Dirección X de la bola (1 = derecha)
+    li $s5, -1         # Dirección Y de la bola (-1 = arriba)
+    li $s6, 32         # Ancho del display (32 celdas por fila)
+
+main_loop:
+    # Lógica de juego principal
+
+    jal leer_tecla       # Leer tecla presionada (sin bloquear)
+    jal mover_pala       # Mover pala según la tecla guardada
+
+    jal pintar_fondo     # Limpiar pantalla
+    jal pintar_ladrillos # Dibujar ladrillos activos
+    jal pintar_pala      # Dibujar pala
+    jal pintar_bola      # Dibujar bola
+    jal mover_bola       # Mover bola y comprobar colisiones
+
+    # Pausa para ralentizar animación
+    li $a0, 100
+    li $v0, 32
+    syscall
+
+    j main_loop          # Repetir el bucle principal
+
+# ------------------- Dibujo del fondo (relleno con color de fondo)
+pintar_fondo:
+    li $t0, 0x10008000   # Dirección base del display
+    li $t4, 1024         # Total de celdas (32x32)
+    lw $t2, COLOR_BG     # Color de fondo
+loop_fondo:
+    sw $t2, 0($t0)       # Pintar una celda
+    addiu $t0, $t0, 4
+    addiu $t4, $t4, -1
+    bgtz $t4, loop_fondo
+    jr $ra
+
+# ------------------- Dibujo de la pala
+pintar_pala:
+    lw $t0, COLOR_PALA
+    li $t1, 5             # Ancho de la pala en celdas
+    li $t2, 0x10008000
+    mul $t3, $s1, $s6     # y * 32
+    add $t3, $t3, $s0     # + x
+    sll $t3, $t3, 2       # Convertir a bytes
+    add $t2, $t2, $t3
+loop_pala:
+    sw $t0, 0($t2)
+    addiu $t2, $t2, 4
+    addiu $t1, $t1, -1
+    bgtz $t1, loop_pala
+    jr $ra
+
+# ------------------- Dibujo de la bola
+pintar_bola:
+    lw $t0, COLOR_BOLA
+    li $t1, 0x10008000
+    mul $t2, $s3, $s6
+    add $t2, $t2, $s2
+    sll $t2, $t2, 2
+    add $t1, $t1, $t2
+    sw $t0, 0($t1)
+    jr $ra
+
+# ------------------- Dibujo de ladrillos activos
+pintar_ladrillos:
+    li $t0, 0            # fila = 0
+pintar_fila:
+    li $t1, 0            # columna = 0
+pintar_columna:
+    la $t2, BRICKS
+    mul $t3, $t0, 32
+    add $t3, $t3, $t1
+    sll $t3, $t3, 2
+    add $t2, $t2, $t3
+    lw $t4, 0($t2)
+    beqz $t4, skip_brick
+
+    # Dirección en display
+    li $t5, 0x10008000
+    mul $t6, $t0, 32
+    add $t6, $t6, $t1
+    sll $t6, $t6, 2
+    add $t5, $t5, $t6
+
+    # Pintar ladrillo
+    lw $t7, COLOR_BRICK
+    sw $t7, 0($t5)
+
+skip_brick:
+    addi $t1, $t1, 1
+    li $t8, 32
+    blt $t1, $t8, pintar_columna
+    addi $t0, $t0, 1
+    li $t8, 5
+    blt $t0, $t8, pintar_fila
+    jr $ra
+
+# ------------------- Leer tecla (non-blocking, guarda en $s7)
+leer_tecla:
+    li $v0, 31           # syscall 31 = leer sin esperar Enter
+    syscall
+    bltz $v0, no_tecla   # Si no hay tecla, salir
+    move $s7, $v0        # Guardar tecla en $s7
+    jr $ra
+no_tecla:
+    li $s7, -1           # Valor especial para indicar "sin tecla"
+    jr $ra
+
+# ------------------- Mover pala según tecla ('a' o 'd')
+mover_pala:
+    li $t0, 97           # Código ASCII de 'a'
+    beq $s7, $t0, pala_izq
+    li $t0, 100          # Código ASCII de 'd'
+    beq $s7, $t0, pala_der
+    jr $ra
+
+pala_izq:
+    bgtz $s0, mover_izq  # Si $s0 > 0, mover
+    jr $ra
+
+pala_der:
+    li $t1, 27           # Límite derecho (32 - 5 = 27)
+    blt $s0, $t1, mover_der
+    jr $ra
+
+mover_izq:
+    addi $s0, $s0, -1    # Mover a la izquierda
+    jr $ra
+
+mover_der:
+    addi $s0, $s0, 1     # Mover a la derecha
+    jr $ra
+
+# ------------------- Lógica de movimiento de la bola y rebotes
+mover_bola:
+    # Posición tentativa
+    add $t0, $s2, $s4
+    add $t1, $s3, $s5
+
+    # Rebote en paredes
+    blt $t0, 0, rebote_x_lad
+    li $t2, 31
+    bgt $t0, $t2, rebote_x_lad
+    blt $t1, 0, rebote_y_lad
+
+    # Colisión con ladrillos
+    li $t3, 5
+    blt $t1, $t3, check_ladrillo
+    j seguir_pala
+
+check_ladrillo:
+    la $t4, BRICKS
+    mul $t5, $t1, 32
+    add $t5, $t5, $t0
+    sll $t5, $t5, 2
+    add $t4, $t4, $t5
+    lw $t6, 0($t4)
+    beqz $t6, seguir_pala
+
+    # Destruir ladrillo y rebotar
+    sw $zero, 0($t4)
+    neg $s5, $s5
+    j aplicar_nueva_pos
+
+seguir_pala:
+    # Rebote con pala
+    addi $t3, $s1, -1
+    bne $t1, $t3, aplicar_nueva_pos
+    blt $t0, $s0, aplicar_nueva_pos
+    li $t4, 5
+    add $t5, $s0, $t4
+    bge $t0, $t5, aplicar_nueva_pos
+    neg $s5, $s5
+
+aplicar_nueva_pos:
+    move $s2, $t0
+    move $s3, $t1
+    jr $ra
+
+rebote_x_lad:
+    neg $s4, $s4
+    j aplicar_nueva_pos
+
+rebote_y_lad:
+    neg $s5, $s5
+    j aplicar_nueva_pos
