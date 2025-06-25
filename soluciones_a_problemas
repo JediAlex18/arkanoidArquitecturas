@@ -1,0 +1,68 @@
+#PARA Q VUELVA A FUNCIONAR LA PALA
+Guarda la tecla leída en un registro preservado, como $s7, en lugar de $t9.
+
+Cambios necesarios:
+1. Modifica leer_tecla para guardar el valor en $s7:
+asm
+Copiar
+Editar
+leer_tecla:
+    li $v0, 12       # leer carácter sin esperar Enter
+    syscall
+    move $s7, $v0    # guardamos tecla en $s7 (en lugar de $t9)
+    jr $ra
+2. En mover_pala, cambia todas las referencias de $t9 por $s7:
+asm
+Copiar
+Editar
+mover_pala:
+    li $t0, 97         # 'a'
+    beq $s7, $t0, pala_izq
+    li $t0, 100        # 'd'
+    beq $s7, $t0, pala_der
+    jr $ra
+
+pala_izq:
+    bgtz $s0, mover_ok
+    jr $ra
+
+pala_der:
+    li $t1, 27
+    blt $s0, $t1, mover_ok
+    jr $ra
+
+mover_ok:
+    li $t0, 97
+    beq $s7, $t0, mover_izq
+    li $t0, 100
+    beq $s7, $t0, mover_der
+    jr $ra
+
+#PARA Q SE MUEVA LA PELOTA INDEPENDIENTEMENTE DE HABER PULSADO TECLAS (aunq esta habrá q probarla)
+Solución: usar el servicio v0 = 31 (Get key if pressed)
+Este servicio retorna -1 si no hay tecla presionada. Cambia tu rutina leer_tecla así:
+
+asm
+Copiar
+Editar
+leer_tecla:
+    li $v0, 31       # Leer carácter SIN bloquear
+    syscall
+    move $t9, $v0    # guardamos tecla
+
+    jr $ra
+Este cambio hace que el juego continúe ejecutando aunque no haya ninguna tecla pulsada, y así la bola se sigue moviendo. Si el jugador pulsa una tecla, esa se almacena en $t9, y mover_pala la procesará si es 'a' o 'd'.
+
+💡 Detalle adicional (opcional)
+Después de cambiar eso, es recomendable también ignorar cualquier valor de $t9 que no sea una tecla válida ('a' o 'd'), para evitar que se mueva la pala por teclas raras.
+
+Tu código mover_pala ya hace eso bien:
+
+asm
+Copiar
+Editar
+li $t0, 97         # 'a'
+beq $t9, $t0, pala_izq
+li $t0, 100        # 'd'
+beq $t9, $t0, pala_der
+jr $ra             # Si no es ni 'a' ni 'd', no mover
